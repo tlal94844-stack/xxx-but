@@ -101,11 +101,12 @@ def download_media_sync(url, output_template):
             if filename and os.path.exists(filename):
                 return filename
             
-            base, _ = os.path.splitext(filename)
-            for ext in ['.mp4', '.mkv', '.webm', '.mov']:
-                alt_file = base + ext
-                if os.path.exists(alt_file):
-                    return alt_file
+            if filename:
+                base, _ = os.path.splitext(filename)
+                for ext in ['.mp4', '.mkv', '.webm', '.mov']:
+                    alt_file = base + ext
+                    if os.path.exists(alt_file):
+                        return alt_file
 
         except Exception as e:
             logging.warning(f"❌ فشلت المحاولة {attempt} بالبروكسي {safe_proxy}: {e}")
@@ -176,7 +177,6 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             try:
                 if os.path.exists(file_path):
                     os.remove(file_path)
-                # تنظيف أي ملفات مؤقتة إضافية قد تتبقى من الدمج
                 base_name = os.path.splitext(file_path)[0]
                 for ext in ['.part', '.ytdl', '.webm', '.mkv']:
                     temp_f = base_name + ext
@@ -188,6 +188,7 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             return  # إنهاء الدالة بنجاح تام وتجنب أي خطأ وهمي
 
         else:
+            # إذا فشلت كل المحاولات ورجع None
             await msg.edit_text("❌ تعذر تحميل الفيديو، تأكد من صحة الرابط.")
 
     except Exception as e:
