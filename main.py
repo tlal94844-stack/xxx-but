@@ -55,7 +55,7 @@ def get_proxy():
 # -----------------------------------------------------------------
 # 🎬 دالة التحميل كمهمة خلفية (Celery Task)
 # -----------------------------------------------------------------
-@celery_app.task(bind=True)
+@celery_app.task(name='vidgo_tasks.download_media_sync', bind=True)
 def download_media_sync(self, url, output_template):
     if 'vt.tiktok.com' in url or 'vm.tiktok.com' in url:
         try:
