@@ -8,6 +8,7 @@ from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
 from config import BOT_TOKEN
 from database import init_db, save_user
+from celery_app import celery_app  # استيراد إعدادات سيلري
 
 # إعداد التسجيل (Logging)
 logging.basicConfig(format='%(asctime)s - %(name)s - %(levelname)s - %(message)s', level=logging.INFO)
@@ -52,9 +53,10 @@ def get_proxy():
     return random.choice(available)
 
 # -----------------------------------------------------------------
-# 🎬 دالة موحدة لتحميل كافة المنصات (بصبر تام للفيديوهات الطويلة)
+# 🎬 دالة التحميل كمهمة خلفية (Celery Task)
 # -----------------------------------------------------------------
-def download_media_sync(url, output_template):
+@celery_app.task(bind=True)
+def download_media_sync(self, url, output_template):
     if 'vt.tiktok.com' in url or 'vm.tiktok.com' in url:
         try:
             res = requests.head(url, allow_redirects=True, timeout=15)
@@ -147,10 +149,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     try:
         output_template = os.path.join(DOWNLOADS_DIR, '%(id)s.%(ext)s')
+        
+        # إرسال المهمة إلى Celery عبر Redis لتنفذ في الخلفية بشكل غير متزامن
+        task = download_media_sync.delay(url, output_template)
+        
+        # انتظار النتيجة بشكل دوري بدون تجميد حلقة أحداث تيليجرام
         loop = asyncio.get_running_loop()
-
-        # تنفيذ التحميل في الخلفية مع إعطاء مساحة زمنية واسعة
-        file_path = await loop.run_in_executor(None, download_media_sync, url, output_template)
+        while not task.ready():
+            await asyncio.sleep(1)
+        
+        file_path = task.get()
 
         if file_path and os.path.exists(file_path):
             file_size_mb = os.path.getsize(file_path) / (1024 * 1024)
@@ -160,20 +168,20 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     os.remove(file_path)
                 return
 
-            # إرسال الفيديو للمستخدم أولاً وبكل ثبات
+            # إرسال الفيديو للمستخدم
             with open(file_path, 'rb') as video_file:
                 await update.message.reply_video(
                     video=video_file,
                     caption="تم التحميل بنجاح بواسطة @vidgoo_bot 🚀"
                 )
             
-            # محاولة حذف رسالة الانتظار بهدوء تام
+            # حذف رسالة الانتظار
             try:
                 await msg.delete()
             except Exception:
                 pass
             
-            # تنظيف الملف المحلي من السيرفر
+            # تنظيف الملفات المؤقتة
             try:
                 if os.path.exists(file_path):
                     os.remove(file_path)
@@ -185,10 +193,9 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
             except Exception:
                 pass
             
-            return  # إنهاء الدالة بنجاح تام وتجنب أي خطأ وهمي
+            return
 
         else:
-            # إذا فشلت كل المحاولات ورجع None
             await msg.edit_text("❌ تعذر تحميل الفيديو، تأكد من صحة الرابط.")
 
     except Exception as e:
@@ -210,7 +217,7 @@ def main():
     app.add_handler(CommandHandler("start", start))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    print("⚡ بوت VidGo جاهز ومستقر تماماً للفيديوهات القصيرة والطويلة...")
+    print("⚡ بوت VidGo صاروخي وجاهز مع Celery و Redis...")
     app.run_polling()
 
 if __name__ == '__main__':
